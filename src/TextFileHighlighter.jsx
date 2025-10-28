@@ -22,30 +22,75 @@ export default function TextFileHighlighter() {
     });
   };
 
-  // ----- getAbsoluteSelection (based on raw content, not DOM) -----
   const getAbsoluteSelection = (container, rawContent, existingHighlights = []) => {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) return null;
+
+    const range = sel.getRangeAt(0);
+    if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) return null;
+
     const selectedString = sel.toString();
     if (!selectedString.trim()) return null;
 
-    // find all possible occurrences of selectedString in rawContent
-    const occurrences = [];
-    let startIndex = 0;
-    while (true) {
-      const idx = rawContent.indexOf(selectedString, startIndex);
-      if (idx === -1) break;
-      occurrences.push([idx, idx + selectedString.length]);
-      startIndex = idx + selectedString.length;
+    // helper to skip cross button spans
+    const isInsideControl = (node) => {
+      let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+      while (el) {
+        if (el.getAttribute && el.getAttribute("data-x") === "true") return true;
+        el = el.parentElement;
+      }
+      return false;
+    };
+
+    let charCount = 0;
+    let start = -1;
+    let end = -1;
+
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const text = node.nodeValue ?? "";
+
+      // skip empty/whitespace nodes
+      if (!text || !text.trim()) continue;
+
+      // skip highlight controls
+      if (isInsideControl(node)) continue;
+
+      if (node === range.startContainer) {
+        start = charCount + range.startOffset;
+      }
+
+      if (node === range.endContainer) {
+        end = charCount + range.endOffset;
+        break;
+      }
+
+      charCount += text.length;
     }
 
-    if (!occurrences.length) return null;
+    // fallback if start wasn’t found in main loop
+    if (start === -1) {
+      let tempCount = 0;
+      const walker2 = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+      while (walker2.nextNode()) {
+        const node = walker2.currentNode;
+        const text = node.nodeValue ?? "";
+        if (!text || !text.trim()) continue;
+        if (isInsideControl(node)) continue;
 
-    // pick the first occurrence that does NOT overlap existing highlights
-    const safeOccurrence = occurrences.find(([s, e]) => !existingHighlights.some(([hs, he]) => e > hs && s < he));
+        if (node === range.startContainer) {
+          start = tempCount + range.startOffset;
+          break;
+        }
+        tempCount += text.length;
+      }
+    }
 
-    if (!safeOccurrence) return null;
-    const [start, end] = safeOccurrence;
+    if (start === -1 || end === -1 || start >= end) return null;
+
+    const overlaps = (existingHighlights || []).some(([hs, he]) => end > hs && start < he);
+    if (overlaps) return null;
 
     return { start, end, selectedText: selectedString };
   };
@@ -67,10 +112,21 @@ export default function TextFileHighlighter() {
     if (!file || !textRef.current) return;
 
     const abs = getAbsoluteSelection(textRef.current, file.content, file.highlights);
-
     if (!abs || !abs.selectedText.trim()) return;
 
     const { start, end, selectedText } = abs;
+
+    // ✅ Check if same text already highlighted elsewhere in this file
+    const alreadyInFile = (file.highlights || []).some(([s, e]) => {
+      const existing = file.content.slice(s, e);
+      return existing === selectedText && (s !== start || e !== end);
+    });
+
+    if (alreadyInFile) {
+      alert(`"${selectedText}" is already highlighted in another position.`);
+      window.getSelection().removeAllRanges();
+      return;
+    }
 
     // Update highlights for the file (merge overlaps)
     setFiles((prev) =>
@@ -81,6 +137,7 @@ export default function TextFileHighlighter() {
       })
     );
 
+    // Update global selectedTexts list
     setSelectedTexts((prev) => {
       const all = [...prev];
 
@@ -91,7 +148,7 @@ export default function TextFileHighlighter() {
       const alreadyExists = cleaned.some((t) => t.fileName === file.name && t.start === start && t.end === end && t.text === selectedText);
       if (!alreadyExists) cleaned.push({ fileName: file.name, text: selectedText, start, end });
 
-      // Sort globally: by fileName (alphabetically or upload order) then by start
+      // Sort globally by file order then by start index
       const fileOrder = files.map((f) => f.name);
       cleaned.sort((a, b) => {
         const fileIdxA = fileOrder.indexOf(a.fileName);
