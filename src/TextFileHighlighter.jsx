@@ -29,10 +29,10 @@ export default function TextFileHighlighter() {
     const range = sel.getRangeAt(0);
     if (!container.contains(range.startContainer) || !container.contains(range.endContainer)) return null;
 
-    const selectedString = sel.toString();
+    let selectedString = sel.toString();
     if (!selectedString.trim()) return null;
 
-    // helper to skip cross button spans
+    // helper to skip highlight control nodes (like cross icons)
     const isInsideControl = (node) => {
       let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
       while (el) {
@@ -51,16 +51,10 @@ export default function TextFileHighlighter() {
       const node = walker.currentNode;
       const text = node.nodeValue ?? "";
 
-      // skip empty/whitespace nodes
       if (!text || !text.trim()) continue;
-
-      // skip highlight controls
       if (isInsideControl(node)) continue;
 
-      if (node === range.startContainer) {
-        start = charCount + range.startOffset;
-      }
-
+      if (node === range.startContainer) start = charCount + range.startOffset;
       if (node === range.endContainer) {
         end = charCount + range.endOffset;
         break;
@@ -69,26 +63,22 @@ export default function TextFileHighlighter() {
       charCount += text.length;
     }
 
-    // fallback if start wasn’t found in main loop
-    if (start === -1) {
-      let tempCount = 0;
-      const walker2 = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
-      while (walker2.nextNode()) {
-        const node = walker2.currentNode;
-        const text = node.nodeValue ?? "";
-        if (!text || !text.trim()) continue;
-        if (isInsideControl(node)) continue;
-
-        if (node === range.startContainer) {
-          start = tempCount + range.startOffset;
-          break;
-        }
-        tempCount += text.length;
-      }
-    }
-
     if (start === -1 || end === -1 || start >= end) return null;
 
+    // --- ✅ Trim whitespace in selection ---
+    // Figure out how many leading/trailing whitespace characters to skip
+    let preTrim = 0;
+    let postTrim = 0;
+    while (preTrim < selectedString.length && /\s/.test(selectedString[preTrim])) preTrim++;
+    while (postTrim < selectedString.length && /\s/.test(selectedString[selectedString.length - 1 - postTrim])) postTrim++;
+
+    if (preTrim > 0 || postTrim > 0) {
+      start += preTrim;
+      end -= postTrim;
+      selectedString = selectedString.slice(preTrim, selectedString.length - postTrim);
+    }
+
+    // prevent overlapping highlights
     const overlaps = (existingHighlights || []).some(([hs, he]) => end > hs && start < he);
     if (overlaps) return null;
 
