@@ -12,7 +12,15 @@ export default function TextFileHighlighter() {
     uploaded.forEach((file) => {
       const reader = new FileReader();
       reader.onload = (ev) => {
-        const content = ev.target.result;
+        // 🔥 normalize text before saving
+        const raw = ev.target.result;
+        const content = raw
+          .replace(/\r\n/g, "\n") // unify line endings
+          .replace(/\r/g, "\n") // remove carriage returns
+          .replace(/[ \t]+/g, " ") // collapse multiple spaces
+          .replace(/\u00A0/g, " ") // replace non-breaking spaces
+          .trim(); // remove leading/trailing whitespace
+
         setFiles((prev) => {
           if (prev.some((p) => p.name === file.name)) return prev;
           return [...prev, { name: file.name, content, highlights: [] }];
@@ -32,7 +40,7 @@ export default function TextFileHighlighter() {
     let selectedString = sel.toString();
     if (!selectedString.trim()) return null;
 
-    // helper to skip highlight control nodes (like cross icons)
+    // helper: skip control elements (cross icons)
     const isInsideControl = (node) => {
       let el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
       while (el) {
@@ -46,15 +54,17 @@ export default function TextFileHighlighter() {
     let start = -1;
     let end = -1;
 
+    // traverse text nodes and accumulate offsets
     const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
     while (walker.nextNode()) {
       const node = walker.currentNode;
       const text = node.nodeValue ?? "";
+      if (!text.trim() || isInsideControl(node)) continue;
 
-      if (!text || !text.trim()) continue;
-      if (isInsideControl(node)) continue;
+      if (node === range.startContainer) {
+        start = charCount + range.startOffset;
+      }
 
-      if (node === range.startContainer) start = charCount + range.startOffset;
       if (node === range.endContainer) {
         end = charCount + range.endOffset;
         break;
@@ -63,22 +73,41 @@ export default function TextFileHighlighter() {
       charCount += text.length;
     }
 
-    if (start === -1 || end === -1 || start >= end) return null;
-
-    // --- ✅ Trim whitespace in selection ---
-    // Figure out how many leading/trailing whitespace characters to skip
-    let preTrim = 0;
-    let postTrim = 0;
-    while (preTrim < selectedString.length && /\s/.test(selectedString[preTrim])) preTrim++;
-    while (postTrim < selectedString.length && /\s/.test(selectedString[selectedString.length - 1 - postTrim])) postTrim++;
-
-    if (preTrim > 0 || postTrim > 0) {
-      start += preTrim;
-      end -= postTrim;
-      selectedString = selectedString.slice(preTrim, selectedString.length - postTrim);
+    // --- fallback for missing start ---
+    if (start === -1) {
+      let tempCount = 0;
+      const walker2 = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+      while (walker2.nextNode()) {
+        const node = walker2.currentNode;
+        const text = node.nodeValue ?? "";
+        if (!text.trim() || isInsideControl(node)) continue;
+        if (node === range.startContainer) {
+          start = tempCount + range.startOffset;
+          break;
+        }
+        tempCount += text.length;
+      }
     }
 
-    // prevent overlapping highlights
+    if (start === -1 || end === -1 || start >= end) return null;
+
+    // ✅ --- HERE: Off-by-one end correction ---
+    if (end < rawContent.length && rawContent.slice(start, end + 1).endsWith(selectedString)) {
+      end += 1;
+    }
+
+    // ✅ --- Whitespace / boundary cleanup ---
+    while (start < end && /\s/.test(rawContent[start])) start++;
+    while (end > start && /\s/.test(rawContent[end - 1])) end--;
+
+    // clamp safely
+    start = Math.max(0, Math.min(start, rawContent.length));
+    end = Math.max(start, Math.min(end, rawContent.length));
+
+    // update actual selected text
+    selectedString = rawContent.slice(start, end);
+
+    // prevent overlap with existing highlights
     const overlaps = (existingHighlights || []).some(([hs, he]) => end > hs && start < he);
     if (overlaps) return null;
 
@@ -103,6 +132,8 @@ export default function TextFileHighlighter() {
 
     const abs = getAbsoluteSelection(textRef.current, file.content, file.highlights);
     if (!abs || !abs.selectedText.trim()) return;
+
+    console.log(abs, "abs");
 
     const { start, end, selectedText } = abs;
 
