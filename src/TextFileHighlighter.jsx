@@ -106,19 +106,18 @@ export default function TextFileHighlighter() {
 
     const { start, end, selectedText } = abs;
 
-    // ✅ Check if same text already highlighted elsewhere in this file
+    // ✅ Block duplicate word highlight (same text, different position)
     const alreadyInFile = (file.highlights || []).some(([s, e]) => {
       const existing = file.content.slice(s, e);
       return existing === selectedText && (s !== start || e !== end);
     });
-
     if (alreadyInFile) {
       alert(`"${selectedText}" is already highlighted in another position.`);
       window.getSelection().removeAllRanges();
       return;
     }
 
-    // Update highlights for the file (merge overlaps)
+    // ✅ Update highlights for the file
     setFiles((prev) =>
       prev.map((f, idx) => {
         if (idx !== currentFileIndex) return f;
@@ -127,18 +126,18 @@ export default function TextFileHighlighter() {
       })
     );
 
-    // Update global selectedTexts list
+    // ✅ Update global selectedTexts (fixed logic)
     setSelectedTexts((prev) => {
       const all = [...prev];
 
-      // Remove any overlapping highlights from same file
-      const cleaned = all.filter((t) => !(t.fileName === file.name && (selectedText.includes(t.text) || t.text.includes(selectedText))));
+      // remove only *overlapping* highlights within the same file (not substring-based)
+      const cleaned = all.filter((t) => !(t.fileName === file.name && !(end <= t.start || start >= t.end)));
 
-      // Add new highlight if not duplicate
+      // add new highlight if not duplicate
       const alreadyExists = cleaned.some((t) => t.fileName === file.name && t.start === start && t.end === end && t.text === selectedText);
       if (!alreadyExists) cleaned.push({ fileName: file.name, text: selectedText, start, end });
 
-      // Sort globally by file order then by start index
+      // sort by file order then by start index
       const fileOrder = files.map((f) => f.name);
       cleaned.sort((a, b) => {
         const fileIdxA = fileOrder.indexOf(a.fileName);
