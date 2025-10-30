@@ -3,15 +3,17 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 // import App from './App';
 import reportWebVitals from './reportWebVitals';
-import TextFileHighlighter from "./TextFileHighlighter";
+// import TextFileHighlighter from "./TextFileHighlighter";
 // import TextFileHighlighter2 from "./TextFileHighlighter2";
+import TextFileHighlighter3 from "./TextFileHighlighter3";
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     {/* <App /> */}
-    <TextFileHighlighter />
+    {/* <TextFileHighlighter /> */}
     {/* <TextFileHighlighter2 /> */}
+    <TextFileHighlighter3 />
   </React.StrictMode>
 );
 
